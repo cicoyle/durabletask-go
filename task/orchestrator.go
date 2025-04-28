@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dapr/kit/ptr"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -51,6 +52,7 @@ type OrchestrationContext struct {
 type callSubOrchestratorOptions struct {
 	instanceID string
 	rawInput   *wrapperspb.StringValue
+	AppID      string
 
 	retryPolicy *RetryPolicy
 }
@@ -68,6 +70,8 @@ func WithKeepUnprocessedEvents() ContinueAsNewOption {
 		ctx.saveBufferedExternalEvents = true
 	}
 }
+
+// TODO: cassie wire appID into suborchestration options too
 
 // WithSubOrchestratorInput is a functional option type for the CallSubOrchestrator
 // orchestrator method that takes an input value and marshals it to JSON.
@@ -270,10 +274,16 @@ func (ctx *OrchestrationContext) CallActivity(activity interface{}, opts ...call
 }
 
 func (ctx *OrchestrationContext) internalScheduleActivity(activityName string, options *callActivityOptions) Task {
+	fmt.Println("internalScheduleActivity ", activityName)
+	fmt.Println("activity options ", options)
 	scheduleTaskAction := &protos.OrchestratorAction{
 		Id: ctx.getNextSequenceNumber(),
 		OrchestratorActionType: &protos.OrchestratorAction_ScheduleTask{
-			ScheduleTask: &protos.ScheduleTaskAction{Name: activityName, Input: options.rawInput},
+			ScheduleTask: &protos.ScheduleTaskAction{
+				Name:  activityName,
+				Input: options.rawInput,
+				AppId: ptr.Of(options.AppID),
+			},
 		},
 	}
 
@@ -309,6 +319,8 @@ func (ctx *OrchestrationContext) CallSubOrchestrator(orchestrator interface{}, o
 }
 
 func (ctx *OrchestrationContext) internalCallSubOrchestrator(orchestratorName string, options *callSubOrchestratorOptions) Task {
+	fmt.Println("internalCallSubOrchestrator ", orchestratorName)
+	fmt.Println("sub orchestrator options ", options)
 	createSubOrchestrationAction := &protos.OrchestratorAction{
 		Id: ctx.getNextSequenceNumber(),
 		OrchestratorActionType: &protos.OrchestratorAction_CreateSubOrchestration{
@@ -316,6 +328,7 @@ func (ctx *OrchestrationContext) internalCallSubOrchestrator(orchestratorName st
 				Name:       orchestratorName,
 				Input:      options.rawInput,
 				InstanceId: options.instanceID,
+				AppId:      ptr.Of(options.AppID),
 			},
 		},
 	}

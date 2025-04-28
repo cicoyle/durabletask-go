@@ -8,6 +8,7 @@ import (
 	"github.com/dapr/durabletask-go/api"
 	"github.com/dapr/durabletask-go/api/helpers"
 	"github.com/dapr/durabletask-go/api/protos"
+	"github.com/dapr/kit/ptr"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -182,6 +183,7 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 				},
 			})
 		} else if scheduleTask := action.GetScheduleTask(); scheduleTask != nil {
+			fmt.Println("scheduleTask", scheduleTask)
 			scheduledEvent := &protos.HistoryEvent{
 				EventId:   action.Id,
 				Timestamp: timestamppb.New(time.Now()),
@@ -191,8 +193,12 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 						Version:            scheduleTask.Version,
 						Input:              scheduleTask.Input,
 						ParentTraceContext: currentTraceContext,
+						// target appid
+						AppId: ptr.Of(scheduleTask.GetAppId()),
 					},
 				},
+				// originating appid
+				AppId: ptr.Of(scheduleTask.GetAppId()),
 			}
 			AddEvent(s, scheduledEvent)
 			s.PendingTasks = append(s.PendingTasks, scheduledEvent)
@@ -271,6 +277,7 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 			return false, fmt.Errorf("unknown action type: %v", action)
 		}
 	}
+	fmt.Printf("s.PendingMessages: %+v\n", s.PendingMessages)
 
 	return false, nil
 }
