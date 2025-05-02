@@ -44,12 +44,13 @@ func (wi *OrchestrationWorkItem) GetAbandonDelay() time.Duration {
 }
 
 type ActivityWorkItem struct {
-	SequenceNumber int64
-	InstanceID     api.InstanceID
-	NewEvent       *HistoryEvent
-	Result         *HistoryEvent
-	LockedBy       string
-	Properties     map[string]interface{}
+	SequenceNumber    int64
+	InstanceID        api.InstanceID
+	NewEvent          *HistoryEvent
+	Result            *HistoryEvent
+	LockedBy          string
+	Properties        map[string]interface{}
+	OrchestratorAppId *string // The appId of the orchestrator that scheduled this activity
 }
 
 // String implements core.WorkItem and fmt.Stringer

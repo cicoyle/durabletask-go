@@ -46,9 +46,15 @@ func (ap *activityProcessor) NextWorkItem(ctx context.Context) (*ActivityWorkIte
 // ProcessWorkItem implements TaskDispatcher
 func (p *activityProcessor) ProcessWorkItem(ctx context.Context, awi *ActivityWorkItem) error {
 	ts := awi.NewEvent.GetTaskScheduled()
+	fmt.Printf("%v: processing work item: %s\n", p.Name(), awi)
+	fmt.Printf("%v: processing ts: %+v\n", ts)
+
 	if ts == nil {
 		return fmt.Errorf("%v: invalid TaskScheduled event", awi.InstanceID)
 	}
+
+	// Store orchestrator's AppId from TaskScheduled event for later completion event routing
+	awi.OrchestratorAppId = ts.OrchestrationAppId
 
 	// Create span as child of spanContext found in TaskScheduledEvent
 	ctx, err := helpers.ContextFromTraceContext(ctx, ts.ParentTraceContext)
@@ -66,6 +72,8 @@ func (p *activityProcessor) ProcessWorkItem(ctx context.Context, awi *ActivityWo
 		}()
 	}
 
+	fmt.Printf("%v: processing work item: %+v\n", *awi.OrchestratorAppId, ts)
+	fmt.Println("cassie, I think here it should just create a pending activity if the task is for calling another appID activity but we see we see")
 	// Execute the activity and get its result
 	result, err := p.executor.ExecuteActivity(ctx, awi.InstanceID, awi.NewEvent)
 	if err != nil {
@@ -76,12 +84,17 @@ func (p *activityProcessor) ProcessWorkItem(ctx context.Context, awi *ActivityWo
 		return err
 	}
 
+	if result != nil && awi.OrchestratorAppId != nil {
+		result.OrchestrationAppID = awi.OrchestratorAppId
+	}
+
 	awi.Result = result
 	return nil
 }
 
 // CompleteWorkItem implements TaskDispatcher
 func (ap *activityProcessor) CompleteWorkItem(ctx context.Context, awi *ActivityWorkItem) error {
+	fmt.Printf("[DURABLETASK] %v: completing work item: %s\n", ap.Name(), awi)
 	if awi.Result == nil {
 		return fmt.Errorf("can't complete work item '%s' with nil result", awi)
 	}

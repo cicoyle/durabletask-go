@@ -4,11 +4,13 @@ import (
 	context "context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/dapr/kit/ptr"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -151,23 +153,31 @@ func (executor *grpcExecutor) ExecuteOrchestrator(ctx context.Context, iid api.I
 
 // ExecuteActivity implements Executor
 func (executor *grpcExecutor) ExecuteActivity(ctx context.Context, iid api.InstanceID, e *protos.HistoryEvent) (*protos.HistoryEvent, error) {
+	fmt.Printf("[DURABLETASK] cassie in backend/executor.go calling execute activity with iid: %s && historyEvent: %+v\n", iid, e)
 	key := getActivityExecutionKey(string(iid), e.EventId)
 	result := &activityExecutionResult{complete: make(chan struct{})}
 	executor.pendingActivities.Store(key, result)
 
+	fmt.Printf("[DURABLETASK] cassie in backend/executor.go after store pending activities. HERE IS E.GetOrchestrationAppID: %s\n", e.GetOrchestrationAppID())
+	fmt.Printf("[DURABLETASK] cassie do i need to store orchestration appID on the work item here????")
 	task := e.GetTaskScheduled()
 	workItem := &protos.WorkItem{
 		Request: &protos.WorkItem_ActivityRequest{
 			ActivityRequest: &protos.ActivityRequest{
-				Name:                  task.Name,
-				Version:               task.Version,
-				Input:                 task.Input,
-				OrchestrationInstance: &protos.OrchestrationInstance{InstanceId: string(iid)},
-				TaskId:                e.EventId,
+				Name:    task.Name,
+				Version: task.Version,
+				Input:   task.Input,
+				OrchestrationInstance: &protos.OrchestrationInstance{
+					InstanceId: string(iid),
+					// probs need to add orchestration app id here TODOOOOOO
+				},
+				TaskId: e.EventId,
 			},
 		},
 	}
 
+	fmt.Printf("cassie confirm if i need the orchestration app id HERE TOO: %s\n", task.GetAppId())
+	fmt.Printf("**** sending work item to executor queue ****\n workitem: %+v\n", workItem)
 	// Send the activity execution work-item to the connected worker.
 	// This will block if the worker isn't listening for work items.
 	select {
@@ -189,7 +199,18 @@ func (executor *grpcExecutor) ExecuteActivity(ctx context.Context, iid api.Insta
 		}
 	}
 
+	fmt.Printf("**** work item executed ****\n result: %+v\n", result)
+
 	var responseEvent *protos.HistoryEvent
+
+	var orchestratorAppId string
+	log.Printf("orchestratorAppId: %v", orchestratorAppId)
+	taskScheduled := e.GetTaskScheduled()
+	if taskScheduled != nil {
+		orchestratorAppId = taskScheduled.GetOrchestrationAppId()
+	}
+
+	fmt.Printf("[DURABLETASK] executing activity with details: %+v\n", result.response)
 	if failureDetails := result.response.GetFailureDetails(); failureDetails != nil {
 		responseEvent = &protos.HistoryEvent{
 			EventId:   -1,
@@ -200,6 +221,8 @@ func (executor *grpcExecutor) ExecuteActivity(ctx context.Context, iid api.Insta
 					FailureDetails:  failureDetails,
 				},
 			},
+			OrchestrationAppID: ptr.Of(orchestratorAppId),
+			AppID:              ptr.Of(e.GetAppID()),
 		}
 	} else {
 		responseEvent = &protos.HistoryEvent{
@@ -211,6 +234,8 @@ func (executor *grpcExecutor) ExecuteActivity(ctx context.Context, iid api.Insta
 					Result:          result.response.Result,
 				},
 			},
+			OrchestrationAppID: ptr.Of(orchestratorAppId),
+			AppID:              ptr.Of(e.GetAppID()),
 		}
 	}
 
@@ -248,6 +273,7 @@ func (grpcExecutor) Hello(ctx context.Context, empty *emptypb.Empty) (*emptypb.E
 
 // GetWorkItems implements protos.TaskHubSidecarServiceServer
 func (g *grpcExecutor) GetWorkItems(req *protos.GetWorkItemsRequest, stream protos.TaskHubSidecarService_GetWorkItemsServer) error {
+	fmt.Printf("[DURABLETASK] **** get work items ****\n with req: %+v\n", req)
 	if md, ok := metadata.FromIncomingContext(stream.Context()); ok {
 		g.logger.Infof("work item stream established by user-agent: %v", md.Get("user-agent"))
 	}
@@ -322,6 +348,7 @@ func (g *grpcExecutor) GetWorkItems(req *protos.GetWorkItemsRequest, stream prot
 				}
 			}
 
+			fmt.Printf("[DURABLETASK] **** sending work item ****\n workitem: %+v\n", wi)
 			if err := stream.Send(wi); err != nil {
 				g.logger.Errorf("encountered an error while sending work item: %v", err)
 				return err
@@ -364,6 +391,8 @@ func (g *grpcExecutor) deletePendingOrchestrator(iid api.InstanceID, res *protos
 
 // CompleteActivityTask implements protos.TaskHubSidecarServiceServer
 func (g *grpcExecutor) CompleteActivityTask(ctx context.Context, res *protos.ActivityResponse) (*protos.CompleteTaskResponse, error) {
+	fmt.Printf("[DURABLETASK] **** complete activity task ****\n with res: %+v\n", res)
+
 	key := getActivityExecutionKey(res.InstanceId, res.TaskId)
 	if g.deletePendingActivityTask(key, res) {
 		return emptyCompleteTaskResponse, nil
@@ -459,7 +488,7 @@ func (g *grpcExecutor) StartInstance(ctx context.Context, req *protos.CreateInst
 	instanceID := req.InstanceId
 	ctx, span := helpers.StartNewCreateOrchestrationSpan(ctx, req.Name, req.Version.GetValue(), instanceID)
 	defer span.End()
-
+	fmt.Printf("[DURABLETASK] **** start instance ****\n with req: %+v\n", req)
 	e := &protos.HistoryEvent{
 		EventId:   -1,
 		Timestamp: timestamppb.New(time.Now()),
@@ -618,6 +647,7 @@ func (grpcExecutor) mustEmbedUnimplementedTaskHubSidecarServiceServer() {
 }
 
 func createGetInstanceResponse(req *protos.GetInstanceRequest, metadata *OrchestrationMetadata) *protos.GetInstanceResponse {
+	fmt.Printf("[DURABLETASK] **** createGetInstanceResponse ****\n with req: %+v\n", req)
 	state := &protos.OrchestrationState{
 		InstanceId:           req.InstanceId,
 		Name:                 metadata.Name,

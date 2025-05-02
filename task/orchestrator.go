@@ -25,6 +25,7 @@ type Orchestrator func(ctx *OrchestrationContext) (any, error)
 // OrchestrationContext is the parameter type for orchestrator functions.
 type OrchestrationContext struct {
 	ID             api.InstanceID
+	AppID          string
 	Name           string
 	IsReplaying    bool
 	CurrentTimeUtc time.Time
@@ -250,6 +251,7 @@ func (octx *OrchestrationContext) GetInput(v any) error {
 // parameter can be either the name of an activity as a string or can be a pointer to the function
 // that implements the activity, in which case the name is obtained via reflection.
 func (ctx *OrchestrationContext) CallActivity(activity interface{}, opts ...callActivityOption) Task {
+	fmt.Printf("[DURABLETASK] CallActivity %+v with ctx.appid: %+v\n", activity, ctx.AppID)
 	options := new(callActivityOptions)
 	for _, configure := range opts {
 		if err := configure(options); err != nil {
@@ -276,6 +278,10 @@ func (ctx *OrchestrationContext) CallActivity(activity interface{}, opts ...call
 func (ctx *OrchestrationContext) internalScheduleActivity(activityName string, options *callActivityOptions) Task {
 	fmt.Println("internalScheduleActivity ", activityName)
 	fmt.Println("activity options ", options)
+	fmt.Println("activity options.appID ", options, options.AppID)
+	fmt.Println("[DURABLETASK] activity ORCHESTRATIONCTX ctx.appID ", options, ctx.AppID)
+	//fmt.Println("cassie ctx.appid: ", ctx.AppID)
+	// CHECK IF I NEED ORCHESTRATOR APPID HERE TOO
 	scheduleTaskAction := &protos.OrchestratorAction{
 		Id: ctx.getNextSequenceNumber(),
 		OrchestratorActionType: &protos.OrchestratorAction_ScheduleTask{
@@ -285,6 +291,9 @@ func (ctx *OrchestrationContext) internalScheduleActivity(activityName string, o
 				AppId: ptr.Of(options.AppID),
 			},
 		},
+		// TODO wire this in differently
+		OrchestratorAppID: ptr.Of(ctx.AppID),
+		//OrchestratorAppID: ptr.Of(ctx.AppID),
 	}
 
 	ctx.pendingActions[scheduleTaskAction.Id] = scheduleTaskAction
@@ -331,6 +340,7 @@ func (ctx *OrchestrationContext) internalCallSubOrchestrator(orchestratorName st
 				AppId:      ptr.Of(options.AppID),
 			},
 		},
+		//AppId: ptr.Of(options.AppID),
 	}
 	ctx.pendingActions[createSubOrchestrationAction.Id] = createSubOrchestrationAction
 

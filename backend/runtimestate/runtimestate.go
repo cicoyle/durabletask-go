@@ -80,6 +80,8 @@ func IsValid(s *protos.OrchestrationRuntimeState) bool {
 
 // ApplyActions takes a set of actions and updates its internal state, including populating the outbox.
 func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.StringValue, actions []*protos.OrchestratorAction, currentTraceContext *protos.TraceContext) (bool, error) {
+	fmt.Printf("[DURABLETASK RUNTIMESTATE.GO] Applying actions: %+v &&\n s: %+v\n", actions, s)
+
 	s.CustomStatus = customStatus
 	for _, action := range actions {
 		if completedAction := action.GetCompleteOrchestration(); completedAction != nil {
@@ -92,6 +94,7 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 					EventType: &protos.HistoryEvent_OrchestratorStarted{
 						OrchestratorStarted: &protos.OrchestratorStartedEvent{},
 					},
+					OrchestrationAppID: action.OrchestratorAppID,
 				})
 
 				// Duplicate the start event info, updating just the input
@@ -111,6 +114,7 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 								ParentTraceContext: s.StartEvent.ParentTraceContext,
 							},
 						},
+						OrchestrationAppID: action.OrchestratorAppID,
 					},
 				)
 
@@ -135,10 +139,15 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 							FailureDetails:      completedAction.FailureDetails,
 						},
 					},
+					OrchestrationAppID: action.OrchestratorAppID,
 				})
 				if s.StartEvent.GetParentInstance() != nil {
+					fmt.Printf("cassie look here and grab orchestration appid properly: %+v\n\n\n", s)
 					msg := &protos.OrchestrationRuntimeStateMessage{
-						HistoryEvent:     &protos.HistoryEvent{EventId: -1, Timestamp: timestamppb.Now()},
+						HistoryEvent: &protos.HistoryEvent{
+							EventId: -1, Timestamp: timestamppb.Now(),
+							//OrchestrationAppID: action.OrchestratorAppID,
+						},
 						TargetInstanceID: s.StartEvent.GetParentInstance().OrchestrationInstance.InstanceId,
 					}
 					if completedAction.OrchestrationStatus == protos.OrchestrationStatus_ORCHESTRATION_STATUS_COMPLETED {
@@ -170,6 +179,7 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 						Name:   createtimer.Name,
 					},
 				},
+				OrchestrationAppID: action.OrchestratorAppID,
 			})
 			// TODO cant pass trace context
 			s.PendingTimers = append(s.PendingTimers, &protos.HistoryEvent{
@@ -183,7 +193,9 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 				},
 			})
 		} else if scheduleTask := action.GetScheduleTask(); scheduleTask != nil {
-			fmt.Println("scheduleTask", scheduleTask)
+			fmt.Println("scheduleTask: ", scheduleTask)
+			fmt.Println("action.OrchestratorAppID: ", action.OrchestratorAppID)
+			// Ensure originating orchestrator's AppId is set on the TaskScheduled event
 			scheduledEvent := &protos.HistoryEvent{
 				EventId:   action.Id,
 				Timestamp: timestamppb.New(time.Now()),
@@ -194,11 +206,13 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 						Input:              scheduleTask.Input,
 						ParentTraceContext: currentTraceContext,
 						// target appid
-						AppId: ptr.Of(scheduleTask.GetAppId()),
+						AppId:              ptr.Of(scheduleTask.GetAppId()),
+						OrchestrationAppId: action.OrchestratorAppID,
 					},
 				},
-				// originating appid
-				AppId: ptr.Of(scheduleTask.GetAppId()),
+				// originating orchestrator appid
+				AppID:              ptr.Of(scheduleTask.GetAppId()),
+				OrchestrationAppID: action.OrchestratorAppID,
 			}
 			AddEvent(s, scheduledEvent)
 			s.PendingTasks = append(s.PendingTasks, scheduledEvent)
@@ -218,8 +232,12 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 						Input:              createSO.Input,
 						InstanceId:         createSO.InstanceId,
 						ParentTraceContext: currentTraceContext,
+						AppId:              createSO.AppId,
+						OrchestrationAppId: action.OrchestratorAppID,
 					},
 				},
+				OrchestrationAppID: createSO.AppId, //TODO verify this
+				AppID:              createSO.AppId,
 			})
 			startEvent := &protos.HistoryEvent{
 				EventId:   -1,
@@ -240,6 +258,7 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 						ParentTraceContext: currentTraceContext,
 					},
 				},
+				OrchestrationAppID: action.OrchestratorAppID,
 			}
 
 			s.PendingMessages = append(s.PendingMessages, &protos.OrchestrationRuntimeStateMessage{HistoryEvent: startEvent, TargetInstanceID: createSO.InstanceId})
@@ -254,6 +273,7 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 						Input:      sendEvent.Data,
 					},
 				},
+				OrchestrationAppID: action.OrchestratorAppID,
 			}
 			AddEvent(s, e)
 			s.PendingMessages = append(s.PendingMessages, &protos.OrchestrationRuntimeStateMessage{HistoryEvent: e, TargetInstanceID: sendEvent.Instance.InstanceId})
@@ -270,6 +290,7 @@ func ApplyActions(s *protos.OrchestrationRuntimeState, customStatus *wrapperspb.
 							Recurse: terminate.Recurse,
 						},
 					},
+					OrchestrationAppID: action.OrchestratorAppID,
 				},
 			}
 			s.PendingMessages = append(s.PendingMessages, msg)
