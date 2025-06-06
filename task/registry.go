@@ -46,6 +46,7 @@ func (r *TaskRegistry) AddActivity(a Activity) error {
 
 // AddActivityN adds an activity function to the registry with a specified name.
 func (r *TaskRegistry) AddActivityN(name string, a Activity) error {
+	fmt.Printf("adding name %s & activity %v\n", name, a)
 	if _, ok := r.activities[name]; ok {
 		return fmt.Errorf("activity named '%s' is already registered", name)
 	}

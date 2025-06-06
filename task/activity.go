@@ -58,6 +58,7 @@ func (policy *RetryPolicy) Validate() error {
 	return nil
 }
 
+// correct here
 func WithAppID(appID string) callActivityOption {
 	return func(opt *callActivityOptions) error {
 		opt.AppID = appID
